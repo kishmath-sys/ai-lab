@@ -1,0 +1,67 @@
+AI LAB  (ChatGPT + Claude + one Gemini review)
+
+Open it: double-click the "AI Lab" icon on your desktop.
+
+What happens when you press Start
+  The steps run in the order shown under "Order of steps". The standard order is:
+  1. Gemini researches (live Google search).
+  2. ChatGPT checks Gemini's research and adds what is missing.
+  3. Claude builds the files: a Word document and an interactive web page (or whichever you picked).
+  4. The program scans the files for accessibility problems (automatic, uses nothing).
+  5. ChatGPT reviews accuracy and accessibility.
+  6. Claude fixes what the review found, then the program scans again.
+  Whoever does a later step checks the earlier one. The scan runs after every build and every fix.
+
+Changing the order
+  Press "Edit steps". For each step pick the AI and the job: Research, Check and extend the research,
+  Build the files, Review accuracy and accessibility, Review accessibility, Review accuracy,
+  Review as a student would read it, Custom review (you type what it should look for), or Apply fixes.
+  Use Up, Down, Remove and Add a step. Press "Save" to keep an order under a name, or "Save and make default"
+  so it loads each time. Rules: exactly one Build step, reviews come after the build, fixes come after a review.
+  Built-in orders: Standard, Extra accessibility check, Fast (no Gemini), Previous order.
+  More steps use more of your allowances and take longer. Gemini steps are skipped if Gemini is not working.
+
+Usage
+  Every run writes usage-report.md: an estimate of what each AI and each step used (about 4 characters per token).
+  The Usage button shows the estimate for the last 5 hours, 24 hours and 7 days, and opens Claude's and ChatGPT's own
+  usage screens (type /usage in Claude, /status in ChatGPT) to see your real allowance. Gemini has no official way.
+  The estimate is lower than real plan use. Use it to compare steps and runs.
+
+Choosing the Gemini model
+  Press "Gemini model". The window lists the models your Gemini tool reports (the same list as typing "agy models").
+  Type the exact name of the one you want, such as the Argon entry, and press Save and test.
+  The run log (log.txt) shows "Gemini model requested" whenever one is set. Empty means the tool's own default.
+
+Where things go
+  C:\ai-lab\runs\<date>_<name>\files                   your finished files (.docx and .html)
+  C:\ai-lab\runs\<date>_<name>\accessibility-report.md the final accessibility scan
+  C:\ai-lab\runs\<date>_<name>\summary.md              one page overview and the check result
+  C:\ai-lab\runs\<date>_<name>\stages                  what each AI wrote at each step
+The window lists your files with Open buttons when a run ends.
+
+Email to your phone
+  Press Set up email once, with your Gmail address and a Google app password.
+  Then tick "Email the finished files to my Gmail when done". When a run finishes (or stops),
+  the files arrive in your inbox as attachments, so you can open them on your phone.
+  The program emails itself, so you can close the window while it runs.
+
+About the accessibility checks
+  They screen against common WCAG 2.1 A and AA problems. They are NOT an ADA or WCAG conformance test.
+  The scan reads the code and cannot judge reading order, wording, or how a screen reader behaves.
+  Contrast is calculated from the colors written in the CSS. Test the final files with a keyboard
+  and a screen reader before you publish them.
+
+Files you can attach: PDF, Word (.docx), .txt, .md, .html, .csv, .json.
+  Scanned PDFs (pictures of pages) cannot be read. Old .doc files: open in Word, Save As .docx.
+
+If a run stops
+  Press "Retry from where it stopped". Finished steps are kept, so nothing is redone.
+  Usage limit message: wait for your plan to reset, then Retry.
+  Not signed in message: open PowerShell, type  claude.cmd  (or  codex.cmd login ), sign in, then Retry.
+  Button "Check sign-ins" in the window tests all three quickly.
+
+Costs
+  The tools sign in with your subscriptions. API keys on the computer are hidden from them so nothing is billed per use.
+  Each run uses your plan allowances. Gemini uses the most. Turn it off for small jobs.
+
+Reinstall or update: run Install-AILab.ps1 again. It keeps your runs folder.

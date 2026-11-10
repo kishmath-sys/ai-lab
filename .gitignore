@@ -1,0 +1,14 @@
+# Never commit these
+config.json
+runs/
+_scratch/
+log.txt
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# Built installer (rebuild with: python build.py dist)
+dist/
+Install-AILab.ps1
