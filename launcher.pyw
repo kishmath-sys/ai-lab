@@ -26,13 +26,6 @@ try:
 except Exception:
     localai = None
 
-# Drag and drop is optional. It needs the tkinterdnd2 package. Without it the Add files button still works.
-try:
-    from tkinterdnd2 import DND_FILES, TkinterDnD
-    BaseTk = TkinterDnD.Tk
-except Exception:
-    DND_FILES = None
-    BaseTk = tk.Tk
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -161,7 +154,7 @@ def make_run(request, title, fmt, steps, attachments, email=False, originals=())
 
 # ------------------------------------------------------------------ the window
 
-class App(BaseTk):
+class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.dnd_ok = False
@@ -275,7 +268,7 @@ class App(BaseTk):
         btns.pack(side="left", padx=(8, 0))
         ttk.Button(btns, text="Add files...", command=self.add_files).pack(fill="x")
         ttk.Button(btns, text="Remove", command=self.remove_files).pack(fill="x", pady=(6, 0))
-        self.setup_drop([box2, top, row, self.file_list])
+        self.after(300, self.setup_drop)
 
         outer3, box3 = self.card(self.input_view)
         outer3.pack(fill="x", pady=(12, 0))
@@ -1076,26 +1069,72 @@ class App(BaseTk):
         if problems:
             messagebox.showinfo("Some files were not added", "\n\n".join(problems))
 
-    def setup_drop(self, widgets):
-        """Lets you drag files from File Explorer onto the files box. Quietly does nothing if the add-on is missing."""
-        if DND_FILES is None:
+    def setup_drop(self):
+        """Lets you drag files from File Explorer onto the AI Lab window (Windows only, no add-on needed).
+        If anything goes wrong it quietly does nothing and the Add files button still works."""
+        self.dnd_ok = False
+        if os.name != "nt":
             return
         try:
-            for w in widgets:
-                w.drop_target_register(DND_FILES)
-                w.dnd_bind("<<Drop>>", self.on_drop)
+            import ctypes
+            from ctypes import wintypes
+            user32, shell32 = ctypes.windll.user32, ctypes.windll.shell32
+            WM_DROPFILES, GWLP_WNDPROC, GA_ROOT = 0x0233, -4, 2
+            LRESULT = ctypes.c_ssize_t
+            WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+            if hasattr(user32, "SetWindowLongPtrW"):
+                setlong = user32.SetWindowLongPtrW
+                setlong.restype = ctypes.c_void_p
+                setlong.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+            else:
+                setlong = user32.SetWindowLongW
+                setlong.restype = ctypes.c_long
+                setlong.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+            user32.GetAncestor.restype = wintypes.HWND
+            user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+            call = user32.CallWindowProcW
+            call.restype = LRESULT
+            call.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+            shell32.DragAcceptFiles.argtypes = [wintypes.HWND, wintypes.BOOL]
+            shell32.DragQueryFileW.restype = wintypes.UINT
+            shell32.DragQueryFileW.argtypes = [ctypes.c_void_p, wintypes.UINT, wintypes.LPWSTR, wintypes.UINT]
+            shell32.DragFinish.argtypes = [ctypes.c_void_p]
+
+            self.update_idletasks()
+            try:
+                top = int(self.wm_frame(), 16)
+            except Exception:
+                top = 0
+            top = top or user32.GetAncestor(self.winfo_id(), GA_ROOT) or self.winfo_id()
+            prev = {"proc": None}
+
+            def handler(hwnd, msg, wparam, lparam):
+                if msg == WM_DROPFILES:
+                    paths = []
+                    try:
+                        count = shell32.DragQueryFileW(wparam, 0xFFFFFFFF, None, 0)
+                        for i in range(count):
+                            n = shell32.DragQueryFileW(wparam, i, None, 0)
+                            buf = ctypes.create_unicode_buffer(n + 1)
+                            shell32.DragQueryFileW(wparam, i, buf, n + 1)
+                            paths.append(buf.value)
+                    finally:
+                        shell32.DragFinish(wparam)
+                    if paths:
+                        self.after(0, lambda p=paths: self.add_paths(p))
+                    return 0
+                return call(prev["proc"], hwnd, msg, wparam, lparam)
+
+            self._drop_proc = WNDPROC(handler)  # keep a reference so it is not freed
+            old = setlong(top, GWLP_WNDPROC, ctypes.cast(self._drop_proc, ctypes.c_void_p))
+            if not old:
+                return
+            prev["proc"] = old
+            shell32.DragAcceptFiles(top, True)
             self.dnd_ok = True
-            self.files_hint.configure(text="  PDF, Word (.docx), text, HTML, CSV.  You can drag files here.")
+            self.files_hint.configure(text="  PDF, Word (.docx), text, HTML, CSV.  You can drag files onto this window.")
         except Exception:
             self.dnd_ok = False
-
-    def on_drop(self, event):
-        try:
-            paths = list(self.tk.splitlist(event.data))
-        except Exception:
-            paths = [event.data]
-        self.add_paths(paths)
-        return event.action
 
     def remove_files(self):
         for index in reversed(self.file_list.curselection()):

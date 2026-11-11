@@ -25,7 +25,7 @@ Other features
 - Personal information check of your request and files before anything is sent online (emails, phone numbers, ID numbers)
 - Optional local AI features using Ollama or LM Studio on your own computer, shown only when one is found: request review, a deeper personal information check, condensing very long files, and a plain language accessibility to-do list
 - Optional email of the finished files to your own Gmail
-- Reads PDF, Word, txt, md, html, csv and json input, with drag and drop onto the files box
+- Reads PDF, Word, txt, md, html, csv and json input, with drag and drop onto the window (Windows built-in, any chip)
 
 ## Requirements
 

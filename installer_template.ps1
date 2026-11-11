@@ -151,9 +151,6 @@ if ((Have 'agy') -or (Test-Path $agyPath)) {
 Step 5 'Word, PDF and reading tools for Python'
 $r = Run-Quiet $py @('-m', 'pip', 'install', '--user', '--quiet', '--disable-pip-version-check', 'python-docx', 'pypdf', 'markdown') $null
 if ($r.ExitCode -eq 0) { Ok 'python-docx, pypdf, markdown' } else { Bad ($r.Text.Substring(0, [Math]::Min(400, $r.Text.Length))); Result 'Python packages' $false 'pip failed' }
-# Optional: lets you drag files onto the files box. If this fails, everything else still works.
-$r2 = Run-Quiet $py @('-m', 'pip', 'install', '--user', '--quiet', '--disable-pip-version-check', 'tkinterdnd2') $null
-if ($r2.ExitCode -eq 0) { Ok 'tkinterdnd2 (drag and drop)' } else { Note 'drag and drop add-on not installed. The Add files button still works.' }
 
 # ---------------------------------------------------------------- 6 app files
 Step 6 'Installing AI Lab into C:\ai-lab'
