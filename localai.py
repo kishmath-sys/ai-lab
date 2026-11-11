@@ -313,6 +313,66 @@ def explain_accessibility(kind, model, report_text, timeout=600):
     return chat(kind, model, A11Y_SYSTEM, report_text[:12000], timeout=timeout)
 
 
+# ---------------------------------------------------------------- choosing and comparing
+
+def pick_default(choices):
+    """Picks a sensible model without asking. Prefers about 3 to 9 billion parameters: fast enough, good enough."""
+    sized = []
+    for c in choices:
+        m = re.search(r"(\d+(?:\.\d+)?)\s*b\b", c[2].lower())
+        sized.append((float(m.group(1)) if m else None, c))
+    mid = [x for x in sized if x[0] is not None and 3 <= x[0] <= 9]
+    if mid:
+        return max(mid, key=lambda x: x[0])[1]
+    small = [x for x in sized if x[0] is not None and x[0] < 3]
+    if small:
+        return max(small, key=lambda x: x[0])[1]
+    big = [x for x in sized if x[0] is not None]
+    if big:
+        return min(big, key=lambda x: x[0])[1]
+    return choices[0] if choices else None
+
+
+def parse_questions(text):
+    """Turns the QUESTIONS section into a clean list of questions."""
+    out = []
+    for line in (text or "").splitlines():
+        line = re.sub(r"^\s*(?:[-*\u2022]|\d+[.)])\s*", "", line).strip()
+        if line and line.lower().strip(". ") not in ("none", "n/a", "no questions"):
+            out.append(line)
+    return out
+
+
+_WORDS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
+          "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "fifteen": "15", "twenty": "20"}
+
+
+def _digit_tokens(text):
+    toks = set()
+    for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9.\-/]*", text):
+        w = w.strip(".-/").lower()
+        if w in _WORDS:
+            toks.add(_WORDS[w])
+        elif any(ch.isdigit() for ch in w):
+            toks.add(w)
+    return toks
+
+
+def check_changes(original, improved):
+    """Accuracy check that needs no AI: numbers and codes added to, or dropped from, the original."""
+    a, b = _digit_tokens(original), _digit_tokens(improved)
+    return sorted(b - a), sorted(a - b)
+
+
+def agreement(text_a, text_b):
+    """0 to 100: how much two wordings agree."""
+    import difflib
+    wa, wb = text_a.lower().split(), text_b.lower().split()
+    if not wa or not wb:
+        return 0
+    return int(round(100 * difflib.SequenceMatcher(None, wa, wb).ratio()))
+
+
 if __name__ == "__main__":
     found = find_local()
     if not found:

@@ -22,10 +22,10 @@ Other features
 - Resume from where a run stopped
 - Usage estimate report for each run and for the last 5 hours, 24 hours and 7 days
 - Gemini model chooser
-- Personal information check of your request and files before anything is sent online (emails, phone numbers, ID numbers)
-- Optional local AI features using Ollama or LM Studio on your own computer, shown only when one is found: request review, a deeper personal information check, condensing very long files, and a plain language accessibility to-do list
-- Optional email of the finished files to your own Gmail
-- Reads PDF, Word, txt, md, html, csv and json input, with drag and drop onto the window (Windows built-in, any chip)
+- One check window before each run: a personal information check (emails, phone numbers, ID numbers), plus, when Ollama or LM Studio is on your computer, a local AI that improves your request and asks questions you can answer in the window
+- Optional second local AI to compare. You see both versions, how closely they agree, and a check for added or dropped numbers
+- Optional local AI extras: a deeper personal information read of files, condensing very long files, and a plain language accessibility to-do list
+- Reads PDF, Word, txt, md, html, csv and json input, with drag and drop onto the files box
 
 ## Requirements
 

@@ -32,21 +32,22 @@ Choosing the Gemini model
   Type the exact name of the one you want, such as the Argon entry, and press Save and test.
   The run log (log.txt) shows "Gemini model requested" whenever one is set. Empty means the tool's own default.
 
-Local AI (only shown if Ollama or LM Studio is on this computer)
-  If neither is installed, none of this appears. The first time you use it, AI Lab lists the models it finds and asks which one
-  to use, then remembers it. Everything here runs on this computer. Nothing goes online and nothing is used from your plans.
-  Small local models can be wrong, so read what they write.
-  1. Review my request: shows an improved version, a few questions to answer, and a privacy check.
-     Press "Use the improved request" to put it in the request box, or close the window to keep your own wording.
-     Press "Choose a different local AI" to change the model.
-  2. Check for personal information (always on, no local AI needed): before a run starts, your request and files are checked for
-     emails, phone numbers, Social Security numbers, ID numbers and dates of birth. You are asked before anything is sent.
-     Turn it off with the checkbox. The optional "local AI also reads my files" box adds a check for names tied to grades or IDs.
-     That check can be wrong either way. It is a safety net, not a guarantee. Never include student records.
-  3. Condense very long files: for files over about 40,000 characters, the local AI shortens them first so less text is sent online.
-     It can lose detail, so it is off by default. The originals are kept in the run folder under originals_not_sent.
-  4. Explain the accessibility report: after a run, "Explain in plain language (local AI)" writes a short to-do list
-     (accessibility-todo.md in the run folder) from the scan results. Check it against accessibility-report.md.
+Check before sending (and the local AI)
+  The box "Check my request before sending" is on by default. When you press Start:
+  - AI Lab looks for personal information in your request and files: emails, phone numbers, Social Security numbers, ID numbers,
+    dates of birth. If it finds some it warns you first. If you have no local AI and nothing is found, you never see a window.
+  - If Ollama or LM Studio is on this computer, a "Check before sending" window opens. Nothing leaves your computer.
+    It shows your request improved, with a few questions. Type answers in the boxes (all optional) and edit the request if you like.
+    Then press Start with this request. Other buttons: Keep editing in the main window, or Use my original wording.
+  - Tick "Skip this check next time" in that window, or untick the box on the main screen, to go straight to a run.
+  AI Lab picks a local AI for you. Change it with the "Local AI settings" button, which only appears when a local AI is found.
+  There you can also pick a second AI to compare. Both review your request, and you see both versions, how closely they agree,
+  and a check for numbers that were added or dropped. It takes about twice as long.
+  Other options in Local AI settings, both off by default: read attached files for names and other personal details,
+  and condense very long files so less is sent online (originals are kept in the run folder under originals_not_sent).
+  After a run, "Explain in plain language (local AI)" writes accessibility-todo.md from the scan report.
+  Small local models can be wrong. Read the improved request before you start. The personal information check is a safety net,
+  not a guarantee. Never include student records.
   To see what AI Lab finds, open PowerShell and run:  python C:\ai-lab\localai.py
 
 Where things go
