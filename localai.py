@@ -202,6 +202,117 @@ def parse_review(raw):
     return parts
 
 
+# ---------------------------------------------------------------- helpers for chunking
+
+def chunks(text, size=6000):
+    """Splits text at paragraph breaks into pieces of at most about `size` characters."""
+    out, cur = [], ""
+    for para in re.split(r"\n\s*\n", text):
+        para = para.strip()
+        if not para:
+            continue
+        while len(para) > size:
+            if cur:
+                out.append(cur); cur = ""
+            out.append(para[:size]); para = para[size:]
+        if len(cur) + len(para) + 2 > size and cur:
+            out.append(cur); cur = ""
+        cur = (cur + "\n\n" + para) if cur else para
+    if cur:
+        out.append(cur)
+    return out
+
+
+# ---------------------------------------------------------------- personal information check
+
+_PATTERNS = [
+    ("email address", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")),
+    ("phone number", re.compile(r"(?<!\d)(?:\+?1[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}(?!\d)")),
+    ("Social Security number", re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)")),
+    ("student or ID number", re.compile(r"(?i)\b(?:student|stu|banner|campus|college|emplid|id)\s*(?:id|number|no\.?|#)?\s*[:#]?\s*[A-Za-z]?\d{6,9}\b")),
+    ("date of birth", re.compile(r"(?i)\b(?:dob|date of birth|birth\s?date)\b\s*[:\-]?\s*\d{1,2}[/-]\d{1,2}[/-]\d{2,4}")),
+]
+
+
+def _mask(value):
+    value = value.strip()
+    if len(value) <= 4:
+        return "****"
+    return value[:2] + "*" * (len(value) - 4) + value[-2:]
+
+
+def scan_personal(text, ignore=()):
+    """Fast pattern check. Returns {label: (count, [masked examples])}. Values are masked so the report is safe to show."""
+    ignore = {i.lower() for i in ignore if i}
+    found = {}
+    for label, pat in _PATTERNS:
+        hits = [m.group(0) for m in pat.finditer(text) if m.group(0).lower() not in ignore]
+        if hits:
+            found[label] = (len(hits), [_mask(h) for h in hits[:3]])
+    return found
+
+
+PERSONAL_SYSTEM = (
+    "You look for personal information about students or other private people in a document. Do NOT summarize the document. "
+    "Report ONLY these: a person's name that appears together with a grade, score, student ID, email, phone number or home address; "
+    "class rosters; gradebook rows; and health or disability accommodation details tied to a named person. "
+    "Do NOT report the course instructor, authors, historical figures, or made up names used inside math word problems. "
+    "Reply with one short line per finding, for example: roster with student names. If there is nothing, reply with the single word NONE."
+)
+
+
+def ai_find_personal(kind, model, text, max_chunks=3, timeout=600, progress=None):
+    """Asks the local AI to look for names tied to private details. Returns a list of short findings."""
+    findings = []
+    parts = chunks(text, 6000)[:max_chunks]
+    for i, part in enumerate(parts, start=1):
+        if progress:
+            progress(f"Local AI reading part {i} of {len(parts)}...")
+        answer = chat(kind, model, PERSONAL_SYSTEM, part, timeout=timeout)
+        for line in answer.splitlines():
+            line = line.strip(" -*\t")
+            if line and line.upper().strip(". ") != "NONE" and line not in findings:
+                findings.append(line[:200])
+    return findings
+
+
+# ---------------------------------------------------------------- condensing long files
+
+CONDENSE_SYSTEM = (
+    "You shorten one section of a long document so another AI can use it as source material. "
+    "Keep every number, formula, equation, definition, standard or outcome code, requirement, deadline, problem statement and source name exactly as written. "
+    "Remove repetition, filler, headers, footers and page numbers. Do not add anything that is not in the section. Do not comment. "
+    "Reply with plain text only."
+)
+
+
+def condense_text(kind, model, text, progress=None, cancelled=None, timeout=900):
+    """Condenses a long text one chunk at a time. Returns the condensed text. Raises RuntimeError if cancelled."""
+    parts = chunks(text, 6000)
+    out = []
+    for i, part in enumerate(parts, start=1):
+        if cancelled and cancelled():
+            raise RuntimeError("cancelled")
+        if progress:
+            progress(f"Condensing part {i} of {len(parts)}...")
+        out.append(chat(kind, model, CONDENSE_SYSTEM, part, timeout=timeout))
+    return "\n\n".join(o for o in out if o)
+
+
+# ---------------------------------------------------------------- plain language accessibility report
+
+A11Y_SYSTEM = (
+    "You explain an automatic accessibility scan to a college instructor who is not technical. "
+    "Write a short numbered to-do list in plain language. For each item say where the problem is, what is wrong, and how to fix it in Word or in the web page. "
+    "Put errors first, then warnings. Use only what the report says. Do not invent problems. Do not say the files are compliant or accessible. "
+    "End with one line: This scan is a screening only. Test with a keyboard and a screen reader before publishing."
+)
+
+
+def explain_accessibility(kind, model, report_text, timeout=600):
+    return chat(kind, model, A11Y_SYSTEM, report_text[:12000], timeout=timeout)
+
+
 if __name__ == "__main__":
     found = find_local()
     if not found:

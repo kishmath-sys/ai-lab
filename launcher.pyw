@@ -40,6 +40,7 @@ RUNS = HERE / "runs"
 AILAB = HERE / "ailab.py"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 MAX_ATTACH_BYTES = 25_000_000
+CONDENSE_OVER = 40_000   # characters of text in one file before condensing is offered
 
 try:
     import convert
@@ -128,7 +129,7 @@ def gemini_present():
         return bool(shutil.which("agy"))
 
 
-def make_run(request, title, fmt, steps, attachments, email=False):
+def make_run(request, title, fmt, steps, attachments, email=False, originals=()):
     RUNS.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     base = RUNS / f"{stamp}_{slug(title or request.strip().splitlines()[0])}"
@@ -146,6 +147,10 @@ def make_run(request, title, fmt, steps, attachments, email=False):
             k += 1
         used.add(name.lower())
         shutil.copy2(src, folder / "inputs" / name)
+    if originals:
+        (folder / "originals_not_sent").mkdir()
+        for src in originals:
+            shutil.copy2(src, folder / "originals_not_sent" / Path(src).name)
     if not title:
         words = request.strip().split()
         title = " ".join(words[:8]).strip(" .,:;")
@@ -163,7 +168,7 @@ class App(BaseTk):
         self.title("AI Lab")
         self.configure(bg=C["bg"])
         self.minsize(760, 560)
-        self.geometry("980x780")
+        self.geometry("980x840")
         families = set(tkfont.families())
         self.family = "Segoe UI" if "Segoe UI" in families else ("Helvetica" if "Helvetica" in families else "TkDefaultFont")
         self.f_body = (self.family, 10)
@@ -172,6 +177,9 @@ class App(BaseTk):
         self.f_h1 = (self.family, 20, "bold")
         self.f_h2 = (self.family, 12, "bold")
         self.attachments = []
+        self.privacy_var = tk.BooleanVar(value=True)
+        self.ai_privacy_var = tk.BooleanVar(value=False)
+        self.condense_var = tk.BooleanVar(value=False)
         self.proc = None
         self.folder = None
         self.queue = queue.Queue()
@@ -243,7 +251,7 @@ class App(BaseTk):
         outer, box = self.card(self.input_view)
         outer.pack(fill="x")
         tk.Label(box, text="1. What do you want?", font=self.f_h2, bg=C["card"], fg=C["ink"]).pack(anchor="w")
-        self.request = tk.Text(box, height=7, wrap="word", font=self.f_body, relief="solid", borderwidth=1,
+        self.request = tk.Text(box, height=5, wrap="word", font=self.f_body, relief="solid", borderwidth=1,
                                highlightthickness=0, padx=8, pady=6, undo=True)
         self.request.pack(fill="x", pady=(6, 0))
         self.request.bind("<FocusIn>", self.clear_placeholder)
@@ -260,7 +268,7 @@ class App(BaseTk):
         self.files_hint.pack(side="left", pady=(3, 0))
         row = tk.Frame(box2, bg=C["card"])
         row.pack(fill="x", pady=(6, 0))
-        self.file_list = tk.Listbox(row, height=3, font=self.f_body, relief="solid", borderwidth=1, highlightthickness=0,
+        self.file_list = tk.Listbox(row, height=2, font=self.f_body, relief="solid", borderwidth=1, highlightthickness=0,
                                     activestyle="none", selectmode="extended")
         self.file_list.pack(side="left", fill="x", expand=True)
         btns = tk.Frame(row, bg=C["card"])
@@ -300,6 +308,13 @@ class App(BaseTk):
                         variable=self.email_var, command=self.email_toggled).pack(side="left")
         ttk.Button(mail_row, text="Set up email", command=self.setup_email).pack(side="left", padx=(12, 0))
 
+        priv_row = tk.Frame(box3, bg=C["card"])
+        priv_row.grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(priv_row, text="Check my request and files for personal information before sending (emails, phone numbers, ID numbers)",
+                        variable=self.privacy_var).pack(anchor="w")
+        self.local_row = tk.Frame(priv_row, bg=C["card"])
+        self.local_row.pack(anchor="w")
+
         bar = tk.Frame(self.input_view, bg=C["bg"])
         bar.pack(fill="x", pady=(16, 0))
         self.start_button = ttk.Button(bar, text="Start", style="Accent.TButton", command=lambda: self.start(mock=False))
@@ -333,8 +348,12 @@ class App(BaseTk):
     def show_local_button(self):
         if self.local_btn is not None:
             return
-        self.local_btn = ttk.Button(self.bar, text="Review my request (local AI)", command=self.local_review)
-        self.local_btn.pack(side="left", padx=(12, 0), after=self.gemini_btn)
+        self.local_btn = ttk.Button(self.local_row, text="Review my request (local AI)", command=self.local_review)
+        self.local_btn.pack(anchor="w", pady=(6, 4))
+        ttk.Checkbutton(self.local_row, text="Have the local AI also read my files for names and other personal details (slower, stays on this computer)",
+                        variable=self.ai_privacy_var).pack(anchor="w")
+        ttk.Checkbutton(self.local_row, text="Condense very long files with the local AI first (may lose detail, originals are kept)",
+                        variable=self.condense_var).pack(anchor="w")
 
     def saved_local(self):
         import ailab
@@ -343,34 +362,89 @@ class App(BaseTk):
             return saved["kind"], saved["model"]
         return None
 
-    def local_review(self, force_choose=False):
-        request = self.request_text()
-        if not request:
-            messagebox.showinfo("Type a request", "Type what you want in the first box, then press this button.")
-            return
+    def remember_local(self, kind, model):
+        import ailab
+        cfg = ailab.load_config()
+        cfg["local_ai"] = {"kind": kind, "model": model}
+        ailab.save_config(cfg)
+
+    def resolve_local(self, parent, say, ready, force=False):
+        """Finds the local AI to use. Uses the remembered choice, asks only when needed, then calls ready(kind, model)."""
+        say("Looking for your local AI. This can take a few seconds...")
+        def work():
+            try:
+                choices = localai.all_choices()
+            except Exception:
+                choices = []
+            self.after(0, lambda: picked(choices))
+        def alive():
+            try:
+                return parent.winfo_exists()
+            except tk.TclError:
+                return False
+        def picked(choices):
+            if not alive():
+                return
+            if not choices:
+                found = localai.find_local()
+                if found:
+                    say("Found " + " and ".join(p["label"] for p in found) + " but no downloaded chat models. "
+                        "Download a model in that program first, then try again.", C["warn"])
+                else:
+                    say("No local AI found.", C["warn"])
+                return
+            if len(choices) == 1:
+                self.remember_local(choices[0][0], choices[0][2])
+                ready(choices[0][0], choices[0][2])
+                return
+            saved = self.saved_local()
+            if saved and not force:
+                for c in choices:
+                    if (c[0], c[2]) == saved:
+                        ready(c[0], c[2])
+                        return
+            ask(choices)
+        def ask(choices):
+            dlg = tk.Toplevel(parent)
+            dlg.title("Which local AI?")
+            dlg.configure(bg=C["card"], padx=20, pady=16)
+            dlg.transient(parent)
+            tk.Label(dlg, text="Which local AI should AI Lab use?", font=self.f_h2, bg=C["card"], fg=C["ink"]).pack(anchor="w")
+            tk.Label(dlg, text="AI Lab will remember your choice. You can change it any time from the review window.",
+                     font=self.f_small, bg=C["card"], fg=C["muted"]).pack(anchor="w", pady=(2, 8))
+            lb = tk.Listbox(dlg, width=60, height=min(12, max(4, len(choices))), font=self.f_body, activestyle="none", exportselection=False)
+            lb.pack(fill="both", expand=True)
+            for c in choices:
+                lb.insert("end", f"{c[1]}:  {c[2]}")
+            lb.selection_set(0)
+            def go():
+                sel = lb.curselection()
+                if not sel:
+                    return
+                c = choices[sel[0]]
+                self.remember_local(c[0], c[2])
+                dlg.destroy()
+                ready(c[0], c[2])
+            ttk.Button(dlg, text="Use this one", style="Accent.TButton", command=go).pack(anchor="w", pady=(10, 0))
+            lb.bind("<Double-Button-1>", lambda _e: go())
+        threading.Thread(target=work, daemon=True).start()
+
+    def local_window(self, title, intro, height=600):
+        """A window with a status line, a text area and a button bar. Returns (win, say, show, bar, alive)."""
         win = tk.Toplevel(self)
-        win.title("Review my request (local AI)")
+        win.title(title)
         win.configure(bg=C["card"], padx=20, pady=16)
         win.transient(self)
-        win.geometry("760x600")
-        tk.Label(win, text="Local AI review", font=self.f_h2, bg=C["card"], fg=C["ink"]).pack(anchor="w")
-        tk.Label(win, text="This runs on this computer. Your request is not sent anywhere. Nothing is used from your ChatGPT, Claude or Gemini plans.",
-                 font=self.f_small, bg=C["card"], fg=C["muted"], wraplength=700, justify="left").pack(anchor="w", pady=(2, 8))
-        status = tk.Label(win, text="Looking for your local AI...", font=self.f_body, bg=C["card"], fg=C["muted"], anchor="w",
-                          wraplength=700, justify="left")
+        win.geometry(f"760x{height}")
+        tk.Label(win, text=title, font=self.f_h2, bg=C["card"], fg=C["ink"]).pack(anchor="w")
+        tk.Label(win, text=intro, font=self.f_small, bg=C["card"], fg=C["muted"], wraplength=700, justify="left").pack(anchor="w", pady=(2, 8))
+        status = tk.Label(win, text="", font=self.f_body, bg=C["card"], fg=C["muted"], anchor="w", wraplength=700, justify="left")
         status.pack(fill="x")
         box = tk.Text(win, wrap="word", font=self.f_body, relief="solid", borderwidth=1, highlightthickness=0, padx=8, pady=6, height=18)
         box.pack(fill="both", expand=True, pady=(8, 8))
         box.configure(state="disabled")
         bar = tk.Frame(win, bg=C["card"])
         bar.pack(fill="x")
-        use_btn = ttk.Button(bar, text="Use the improved request", state="disabled")
-        use_btn.pack(side="left")
-        change_btn = ttk.Button(bar, text="Choose a different local AI")
-        change_btn.pack(side="left", padx=(10, 0))
-        ttk.Button(bar, text="Close", command=win.destroy).pack(side="right")
-        names = [Path(a).name for a in self.attachments]
-        state = {"improved": ""}
 
         def alive():
             try:
@@ -388,6 +462,23 @@ class App(BaseTk):
                 box.delete("1.0", "end")
                 box.insert("1.0", text)
                 box.configure(state="disabled")
+        return win, say, show, bar, alive
+
+    LOCAL_PRIVATE = "This runs on this computer. Nothing is sent anywhere and nothing is used from your ChatGPT, Claude or Gemini plans."
+
+    def local_review(self):
+        request = self.request_text()
+        if not request:
+            messagebox.showinfo("Type a request", "Type what you want in the first box, then press this button.")
+            return
+        win, say, show, bar, alive = self.local_window("Local AI review", self.LOCAL_PRIVATE)
+        use_btn = ttk.Button(bar, text="Use the improved request", state="disabled")
+        use_btn.pack(side="left")
+        change_btn = ttk.Button(bar, text="Choose a different local AI")
+        change_btn.pack(side="left", padx=(10, 0))
+        ttk.Button(bar, text="Close", command=win.destroy).pack(side="right")
+        names = [Path(a).name for a in self.attachments]
+        state = {"improved": ""}
 
         def run_with(kind, model):
             say(f"Reviewing with {model}. The first answer can take a minute or two while the model loads...")
@@ -423,76 +514,147 @@ class App(BaseTk):
 
         use_btn.configure(command=use_improved)
 
-        def choose():
-            say("Looking for local AI models on this computer. This can take a few seconds...")
+        def change():
+            use_btn.configure(state="disabled")
+            self.resolve_local(win, say, run_with, force=True)
+        change_btn.configure(command=change)
+        self.resolve_local(win, say, run_with)
+
+    # ---- plain language accessibility report
+    def explain_a11y(self):
+        report = self.folder / "accessibility-report.md"
+        if not report.is_file():
+            messagebox.showinfo("No report", "There is no accessibility report for this run.")
+            return
+        win, say, show, bar, alive = self.local_window("Accessibility to-do list (local AI)", self.LOCAL_PRIVATE, height=560)
+        open_btn = ttk.Button(bar, text="Open the saved to-do list", state="disabled")
+        open_btn.pack(side="left")
+        ttk.Button(bar, text="Close", command=win.destroy).pack(side="right")
+        target = self.folder / "accessibility-todo.md"
+        open_btn.configure(command=lambda: open_path(target))
+
+        def run_with(kind, model):
+            say(f"Reading the report with {model}...")
             def work():
                 try:
-                    choices = localai.all_choices()
-                except Exception:
-                    choices = []
-                self.after(0, lambda: picked(choices))
+                    text = localai.explain_accessibility(kind, model, report.read_text(encoding="utf-8", errors="replace"))
+                except Exception as err:
+                    self.after(0, lambda: say("The local AI did not answer: " + str(err)[:300], C["bad"]))
+                    return
+                def done():
+                    if not alive():
+                        return
+                    if not text:
+                        say("The local AI returned nothing.", C["warn"])
+                        return
+                    try:
+                        target.write_text("# Accessibility to-do list (written by a local AI from the scan report)\n\n" + text + "\n", encoding="utf-8")
+                        open_btn.configure(state="normal")
+                    except OSError:
+                        pass
+                    show(text)
+                    say("Done. A local AI wrote this from the scan, so check it against accessibility-report.md.", C["ok"])
+                self.after(0, done)
+            threading.Thread(target=work, daemon=True).start()
+        self.resolve_local(win, say, run_with)
+
+    # ---- checks before a run starts (personal information, condensing long files)
+    def prepare_attachments(self, request, mock, proceed):
+        """Calls proceed(attachments, originals) when it is fine to start. originals are files replaced by condensed copies."""
+        files = list(self.attachments)
+        want_scan = (not mock) and self.privacy_var.get() and (files or request)
+        want_ai = want_scan and self.ai_privacy_var.get() and localai is not None
+        want_condense = (not mock) and self.condense_var.get() and localai is not None and files
+        if not (want_scan or want_condense):
+            proceed(files, [])
+            return
+        win, say, show, bar, alive = self.local_window("Checking before sending", "Checks run on this computer. Nothing is sent online yet.", height=420)
+        cancel = {"on": False}
+
+        def close():
+            cancel["on"] = True
+            if alive():
+                win.destroy()
+        win.protocol("WM_DELETE_WINDOW", close)
+        ttk.Button(bar, text="Cancel", command=close).pack(side="right")
+
+        def stage_two(kind, model):
+            def work():
+                import ailab
+                ignore = [ailab.load_config().get("email_address", "")]
+                findings, texts = [], {}
+                try:
+                    say_t = lambda t: self.after(0, lambda: say(t))
+                    if want_scan:
+                        say_t("Checking for personal information...")
+                        pieces = [("your request", request)]
+                        for f in files:
+                            text, _note = convert.extract_text(Path(f))
+                            texts[f] = text
+                            pieces.append((Path(f).name, text))
+                        for name, text in pieces:
+                            for label, (count, ex) in localai.scan_personal(text, ignore).items():
+                                findings.append(f"{name}: {count} possible {label}  ({', '.join(ex)})")
+                            if want_ai and kind and text.strip():
+                                for line in localai.ai_find_personal(kind, model, text, progress=say_t):
+                                    if cancel["on"]:
+                                        return
+                                    findings.append(f"{name}: {line}  (local AI, may be a false alarm)")
+                    final, originals = list(files), []
+                    if want_condense and kind:
+                        for i, f in enumerate(files):
+                            text = texts.get(f)
+                            if text is None:
+                                text, _note = convert.extract_text(Path(f))
+                            if len(text) < CONDENSE_OVER:
+                                continue
+                            say_t(f"Condensing {Path(f).name}. This can take several minutes...")
+                            short = localai.condense_text(kind, model, text, progress=say_t, cancelled=lambda: cancel["on"])
+                            if not short.strip():
+                                continue
+                            out_dir = HERE / "_condensed"
+                            out_dir.mkdir(exist_ok=True)
+                            out = out_dir / (Path(f).stem + " (condensed).md")
+                            out.write_text("# Condensed from " + Path(f).name + "\n\nA local AI shortened this long file. Some detail may be missing.\n\n" + short + "\n", encoding="utf-8")
+                            final[i] = str(out)
+                            originals.append(f)
+                except Exception as err:
+                    if cancel["on"]:
+                        return
+                    self.after(0, lambda: finish(None, None, [], str(err)))
+                    return
+                if cancel["on"]:
+                    return
+                self.after(0, lambda: finish(final, originals, findings, ""))
             threading.Thread(target=work, daemon=True).start()
 
-        def picked(choices):
+        def finish(final, originals, findings, error):
             if not alive():
                 return
-            if not choices:
-                found = localai.find_local()
-                if found:
-                    say("Found " + " and ".join(p["label"] for p in found) + " but no downloaded chat models. "
-                        "Download a model in that program first, then try again.", C["warn"])
-                else:
-                    say("No local AI found.", C["warn"])
-                return
-            saved = self.saved_local()
-            if len(choices) == 1:
-                remember(choices[0])
-                run_with(choices[0][0], choices[0][2])
-                return
-            if saved and not force_choose_flag["on"]:
-                for c in choices:
-                    if (c[0], c[2]) == saved:
-                        run_with(c[0], c[2])
-                        return
-            ask(choices)
-
-        def remember(c):
-            import ailab
-            cfg = ailab.load_config()
-            cfg["local_ai"] = {"kind": c[0], "model": c[2]}
-            ailab.save_config(cfg)
-
-        def ask(choices):
-            dlg = tk.Toplevel(win)
-            dlg.title("Which local AI?")
-            dlg.configure(bg=C["card"], padx=20, pady=16)
-            dlg.transient(win)
-            tk.Label(dlg, text="Which local AI should review your requests?", font=self.f_h2, bg=C["card"], fg=C["ink"]).pack(anchor="w")
-            tk.Label(dlg, text="AI Lab will remember your choice. You can change it any time from the review window.",
-                     font=self.f_small, bg=C["card"], fg=C["muted"]).pack(anchor="w", pady=(2, 8))
-            lb = tk.Listbox(dlg, width=60, height=min(12, max(4, len(choices))), font=self.f_body, activestyle="none", exportselection=False)
-            lb.pack(fill="both", expand=True)
-            for c in choices:
-                lb.insert("end", f"{c[1]}:  {c[2]}")
-            lb.selection_set(0)
-            def go():
-                sel = lb.curselection()
-                if not sel:
+            if error:
+                win.destroy()
+                if not messagebox.askyesno("Check did not finish", "A check before sending did not finish:\n" + error[:300] +
+                                           "\n\nStart the run anyway with the original files?"):
                     return
-                c = choices[sel[0]]
-                remember(c)
-                dlg.destroy()
-                run_with(c[0], c[2])
-            ttk.Button(dlg, text="Use this one", style="Accent.TButton", command=go).pack(anchor="w", pady=(10, 0))
-            lb.bind("<Double-Button-1>", lambda _e: go())
+                proceed(files, [])
+                return
+            if findings:
+                win.destroy()
+                text = "\n".join(findings[:15]) + ("\n..." if len(findings) > 15 else "")
+                if not messagebox.askyesno("Possible personal information",
+                                           "This may contain personal information that would be sent to online AI services:\n\n" + text +
+                                           "\n\nSend anyway?\n(Choose No to go back, then remove the details or the file.)", default="no"):
+                    return
+                proceed(final, originals)
+                return
+            win.destroy()
+            proceed(final, originals)
 
-        force_choose_flag = {"on": force_choose}
-        def change():
-            force_choose_flag["on"] = True
-            use_btn.configure(state="disabled")
-            choose()
-        change_btn.configure(command=change)
-        choose()
+        need_model = (want_ai or want_condense)
+        if need_model:
+            self.resolve_local(win, say, lambda k, m: stage_two(k, m))
+        else:
+            stage_two(None, None)
 
     # ---- Gemini model
     def gemini_model(self):
@@ -1083,14 +1245,18 @@ class App(BaseTk):
             return
         if len(steps) > 7 and not messagebox.askyesno("Many steps", f"This order has {len(steps)} steps. It will use a lot of your allowances and take longer.\n\nContinue?"):
             return
-        try:
-            self.folder = make_run(request, self.title_var.get().strip(), fmt, steps, self.attachments,
-                                   email=(self.email_var.get() and not mock))
-        except Exception as err:
-            messagebox.showerror("Could not start", str(err))
-            return
-        self.mock = mock
-        self.launch(first=True)
+        email = self.email_var.get() and not mock
+        title = self.title_var.get().strip()
+
+        def go(attachments, originals):
+            try:
+                self.folder = make_run(request, title, fmt, steps, attachments, email=email, originals=originals)
+            except Exception as err:
+                messagebox.showerror("Could not start", str(err))
+                return
+            self.mock = mock
+            self.launch(first=True)
+        self.prepare_attachments(request, mock, go)
 
     def launch(self, first):
         self.show_run()
@@ -1241,6 +1407,8 @@ class App(BaseTk):
         ttk.Button(tail, text="Open summary", command=lambda: open_path(self.folder / "summary.md")).pack(side="left", padx=(8, 0))
         if self.a11y is not None:
             ttk.Button(tail, text="Open accessibility report", command=lambda: open_path(self.folder / "accessibility-report.md")).pack(side="left", padx=(8, 0))
+        if self.a11y is not None and self.local_btn is not None:
+            ttk.Button(tail, text="Explain in plain language (local AI)", command=self.explain_a11y).pack(side="left", padx=(8, 0))
         if (self.folder / "usage-report.md").is_file():
             ttk.Button(tail, text="Open usage report", command=lambda: open_path(self.folder / "usage-report.md")).pack(side="left", padx=(8, 0))
         ttk.Button(tail, text="Open all steps", command=lambda: open_path(self.folder / "stages")).pack(side="left", padx=(8, 0))

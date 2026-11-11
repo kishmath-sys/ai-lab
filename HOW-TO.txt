@@ -32,14 +32,21 @@ Choosing the Gemini model
   Type the exact name of the one you want, such as the Argon entry, and press Save and test.
   The run log (log.txt) shows "Gemini model requested" whenever one is set. Empty means the tool's own default.
 
-Local AI review (only if you have one)
-  If Ollama or LM Studio is installed on this computer, a button "Review my request (local AI)" appears next to Gemini model.
-  If neither is installed, the button does not appear. The first time, AI Lab lists the models it finds and asks which one to use,
-  then remembers it. Press "Choose a different local AI" in the review window to change it.
-  It reads your request and shows an improved version, a few questions to answer, and a privacy check for personal details.
-  Press "Use the improved request" to put it in the request box, or close the window to keep your own wording.
-  It runs only on this computer. Nothing goes to the internet and nothing is used from your plans.
-  Small local models can be wrong. Read the improved request before you start.
+Local AI (only shown if Ollama or LM Studio is on this computer)
+  If neither is installed, none of this appears. The first time you use it, AI Lab lists the models it finds and asks which one
+  to use, then remembers it. Everything here runs on this computer. Nothing goes online and nothing is used from your plans.
+  Small local models can be wrong, so read what they write.
+  1. Review my request: shows an improved version, a few questions to answer, and a privacy check.
+     Press "Use the improved request" to put it in the request box, or close the window to keep your own wording.
+     Press "Choose a different local AI" to change the model.
+  2. Check for personal information (always on, no local AI needed): before a run starts, your request and files are checked for
+     emails, phone numbers, Social Security numbers, ID numbers and dates of birth. You are asked before anything is sent.
+     Turn it off with the checkbox. The optional "local AI also reads my files" box adds a check for names tied to grades or IDs.
+     That check can be wrong either way. It is a safety net, not a guarantee. Never include student records.
+  3. Condense very long files: for files over about 40,000 characters, the local AI shortens them first so less text is sent online.
+     It can lose detail, so it is off by default. The originals are kept in the run folder under originals_not_sent.
+  4. Explain the accessibility report: after a run, "Explain in plain language (local AI)" writes a short to-do list
+     (accessibility-todo.md in the run folder) from the scan results. Check it against accessibility-report.md.
   To see what AI Lab finds, open PowerShell and run:  python C:\ai-lab\localai.py
 
 Where things go

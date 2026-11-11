@@ -12,3 +12,4 @@ __pycache__/
 # Built installer (rebuild with: python build.py dist)
 dist/
 Install-AILab.ps1
+_condensed/
