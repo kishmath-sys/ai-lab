@@ -21,6 +21,14 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinter import font as tkfont
 
+# Drag and drop is optional. It needs the tkinterdnd2 package. Without it the Add files button still works.
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    BaseTk = TkinterDnD.Tk
+except Exception:
+    DND_FILES = None
+    BaseTk = tk.Tk
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 RUNS = HERE / "runs"
@@ -143,9 +151,10 @@ def make_run(request, title, fmt, steps, attachments, email=False):
 
 # ------------------------------------------------------------------ the window
 
-class App(tk.Tk):
+class App(BaseTk):
     def __init__(self):
         super().__init__()
+        self.dnd_ok = False
         self.title("AI Lab")
         self.configure(bg=C["bg"])
         self.minsize(760, 560)
@@ -241,7 +250,8 @@ class App(tk.Tk):
         top = tk.Frame(box2, bg=C["card"])
         top.pack(fill="x")
         tk.Label(top, text="2. Files to use (optional)", font=self.f_h2, bg=C["card"], fg=C["ink"]).pack(side="left")
-        tk.Label(top, text="  PDF, Word (.docx), text, HTML, CSV", font=self.f_small, bg=C["card"], fg=C["muted"]).pack(side="left", pady=(3, 0))
+        self.files_hint = tk.Label(top, text="  PDF, Word (.docx), text, HTML, CSV", font=self.f_small, bg=C["card"], fg=C["muted"])
+        self.files_hint.pack(side="left", pady=(3, 0))
         row = tk.Frame(box2, bg=C["card"])
         row.pack(fill="x", pady=(6, 0))
         self.file_list = tk.Listbox(row, height=3, font=self.f_body, relief="solid", borderwidth=1, highlightthickness=0,
@@ -251,6 +261,7 @@ class App(tk.Tk):
         btns.pack(side="left", padx=(8, 0))
         ttk.Button(btns, text="Add files...", command=self.add_files).pack(fill="x")
         ttk.Button(btns, text="Remove", command=self.remove_files).pack(fill="x", pady=(6, 0))
+        self.setup_drop([box2, top, row, self.file_list])
 
         outer3, box3 = self.card(self.input_view)
         outer3.pack(fill="x", pady=(12, 0))
@@ -689,18 +700,54 @@ class App(tk.Tk):
     def add_files(self):
         kinds = " ".join("*" + e for e in ATTACH_TYPES)
         paths = filedialog.askopenfilenames(title="Choose files", filetypes=[("Supported files", kinds), ("All files", "*.*")])
+        self.add_paths(paths)
+
+    def add_paths(self, paths):
+        problems = []
         for p in paths:
-            ext = Path(p).suffix.lower()
+            path = Path(p)
+            if path.is_dir():
+                problems.append(f"{path.name}\nFolders cannot be added. Open the folder and drop the files inside it.")
+                continue
+            ext = path.suffix.lower()
             if ext not in ATTACH_TYPES:
-                messagebox.showinfo("Not supported", f"{Path(p).name}\n\n{ext or 'This type'} files cannot be read. "
-                                    "Supported: PDF, Word (.docx), and text-type files. For an old .doc file, open it in Word and Save As .docx.")
+                problems.append(f"{path.name}\n{ext or 'This type'} files cannot be read. "
+                                "Supported: PDF, Word (.docx), and text-type files. For an old .doc file, open it in Word and Save As .docx.")
                 continue
-            if Path(p).stat().st_size > MAX_ATTACH_BYTES:
-                messagebox.showinfo("Too large", f"{Path(p).name} is larger than 25 MB.")
+            try:
+                too_big = path.stat().st_size > MAX_ATTACH_BYTES
+            except OSError:
+                problems.append(f"{path.name}\nThis file could not be opened.")
                 continue
-            if p not in self.attachments:
-                self.attachments.append(p)
-                self.file_list.insert("end", Path(p).name)
+            if too_big:
+                problems.append(f"{path.name}\nThis file is larger than 25 MB.")
+                continue
+            if str(path) not in self.attachments:
+                self.attachments.append(str(path))
+                self.file_list.insert("end", path.name)
+        if problems:
+            messagebox.showinfo("Some files were not added", "\n\n".join(problems))
+
+    def setup_drop(self, widgets):
+        """Lets you drag files from File Explorer onto the files box. Quietly does nothing if the add-on is missing."""
+        if DND_FILES is None:
+            return
+        try:
+            for w in widgets:
+                w.drop_target_register(DND_FILES)
+                w.dnd_bind("<<Drop>>", self.on_drop)
+            self.dnd_ok = True
+            self.files_hint.configure(text="  PDF, Word (.docx), text, HTML, CSV.  You can drag files here.")
+        except Exception:
+            self.dnd_ok = False
+
+    def on_drop(self, event):
+        try:
+            paths = list(self.tk.splitlist(event.data))
+        except Exception:
+            paths = [event.data]
+        self.add_paths(paths)
+        return event.action
 
     def remove_files(self):
         for index in reversed(self.file_list.curselection()):

@@ -52,6 +52,7 @@ About the accessibility checks
   and a screen reader before you publish them.
 
 Files you can attach: PDF, Word (.docx), .txt, .md, .html, .csv, .json.
+  Press "Add files" or drag files from File Explorer onto the files box. Folders cannot be dropped, drop the files inside.
   Scanned PDFs (pictures of pages) cannot be read. Old .doc files: open in Word, Save As .docx.
 
 If a run stops

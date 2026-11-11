@@ -23,7 +23,7 @@ Other features
 - Usage estimate report for each run and for the last 5 hours, 24 hours and 7 days
 - Gemini model chooser
 - Optional email of the finished files to your own Gmail
-- Reads PDF, Word, txt, md, html, csv and json input
+- Reads PDF, Word, txt, md, html, csv and json input, with drag and drop onto the files box
 
 ## Requirements
 
