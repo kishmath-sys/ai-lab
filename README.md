@@ -22,6 +22,7 @@ Other features
 - Resume from where a run stopped
 - Usage estimate report for each run and for the last 5 hours, 24 hours and 7 days
 - Gemini model chooser
+- Optional review of your request by a local AI (Ollama or LM Studio) that runs only on your computer. The button appears only when one is found
 - Optional email of the finished files to your own Gmail
 - Reads PDF, Word, txt, md, html, csv and json input, with drag and drop onto the files box
 
@@ -75,6 +76,7 @@ Always test final files with a keyboard and a screen reader, and check your inst
 - `convert.py` reads and writes Word files and builds the web page
 - `a11y.py` is the accessibility scanner and can be used on its own
 - `mailer.py` sends the Gmail message
+- `localai.py` finds and talks to a local AI on this computer, using localhost only
 - `build.py` and `installer_template.ps1` build the single-file installer
 
 ## License

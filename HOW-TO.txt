@@ -32,6 +32,16 @@ Choosing the Gemini model
   Type the exact name of the one you want, such as the Argon entry, and press Save and test.
   The run log (log.txt) shows "Gemini model requested" whenever one is set. Empty means the tool's own default.
 
+Local AI review (only if you have one)
+  If Ollama or LM Studio is installed on this computer, a button "Review my request (local AI)" appears next to Gemini model.
+  If neither is installed, the button does not appear. The first time, AI Lab lists the models it finds and asks which one to use,
+  then remembers it. Press "Choose a different local AI" in the review window to change it.
+  It reads your request and shows an improved version, a few questions to answer, and a privacy check for personal details.
+  Press "Use the improved request" to put it in the request box, or close the window to keep your own wording.
+  It runs only on this computer. Nothing goes to the internet and nothing is used from your plans.
+  Small local models can be wrong. Read the improved request before you start.
+  To see what AI Lab finds, open PowerShell and run:  python C:\ai-lab\localai.py
+
 Where things go
   C:\ai-lab\runs\<date>_<name>\files                   your finished files (.docx and .html)
   C:\ai-lab\runs\<date>_<name>\accessibility-report.md the final accessibility scan

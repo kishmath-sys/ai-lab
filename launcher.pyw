@@ -21,6 +21,11 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinter import font as tkfont
 
+try:
+    import localai
+except Exception:
+    localai = None
+
 # Drag and drop is optional. It needs the tkinterdnd2 package. Without it the Add files button still works.
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -194,6 +199,7 @@ class App(BaseTk):
         self.after(150, self.pump)
         self.after(200, self.spin)
         self.after(300, self.check_tools)
+        self.after(600, self.detect_local)
 
     # ---- styling
     def style_setup(self):
@@ -300,13 +306,193 @@ class App(BaseTk):
         self.start_button.pack(side="left")
         ttk.Button(bar, text="Practice run (uses nothing)", command=lambda: self.start(mock=True)).pack(side="left", padx=(12, 0))
         ttk.Button(bar, text="Check sign-ins", command=self.check_signins).pack(side="left", padx=(12, 0))
-        ttk.Button(bar, text="Gemini model", command=self.gemini_model).pack(side="left", padx=(12, 0))
+        self.gemini_btn = ttk.Button(bar, text="Gemini model", command=self.gemini_model)
+        self.gemini_btn.pack(side="left", padx=(12, 0))
+        self.bar = bar
+        self.local_btn = None
         ttk.Button(bar, text="Past runs", command=self.past_runs).pack(side="right")
         ttk.Button(bar, text="Usage", command=self.show_usage).pack(side="right", padx=(0, 10))
 
         self.note = tk.Label(self.input_view, text="Runs take a few minutes. You can leave. The finished files are saved for you.",
                              font=self.f_small, bg=C["bg"], fg=C["muted"])
         self.note.pack(anchor="w", pady=(10, 0))
+
+    # ---- local AI (optional, only shown when one is found on this computer)
+    def detect_local(self):
+        if localai is None:
+            return
+        def work():
+            try:
+                found = localai.find_local()
+            except Exception:
+                found = []
+            if found:
+                self.after(0, self.show_local_button)
+        threading.Thread(target=work, daemon=True).start()
+
+    def show_local_button(self):
+        if self.local_btn is not None:
+            return
+        self.local_btn = ttk.Button(self.bar, text="Review my request (local AI)", command=self.local_review)
+        self.local_btn.pack(side="left", padx=(12, 0), after=self.gemini_btn)
+
+    def saved_local(self):
+        import ailab
+        saved = ailab.load_config().get("local_ai") or {}
+        if saved.get("kind") and saved.get("model"):
+            return saved["kind"], saved["model"]
+        return None
+
+    def local_review(self, force_choose=False):
+        request = self.request_text()
+        if not request:
+            messagebox.showinfo("Type a request", "Type what you want in the first box, then press this button.")
+            return
+        win = tk.Toplevel(self)
+        win.title("Review my request (local AI)")
+        win.configure(bg=C["card"], padx=20, pady=16)
+        win.transient(self)
+        win.geometry("760x600")
+        tk.Label(win, text="Local AI review", font=self.f_h2, bg=C["card"], fg=C["ink"]).pack(anchor="w")
+        tk.Label(win, text="This runs on this computer. Your request is not sent anywhere. Nothing is used from your ChatGPT, Claude or Gemini plans.",
+                 font=self.f_small, bg=C["card"], fg=C["muted"], wraplength=700, justify="left").pack(anchor="w", pady=(2, 8))
+        status = tk.Label(win, text="Looking for your local AI...", font=self.f_body, bg=C["card"], fg=C["muted"], anchor="w",
+                          wraplength=700, justify="left")
+        status.pack(fill="x")
+        box = tk.Text(win, wrap="word", font=self.f_body, relief="solid", borderwidth=1, highlightthickness=0, padx=8, pady=6, height=18)
+        box.pack(fill="both", expand=True, pady=(8, 8))
+        box.configure(state="disabled")
+        bar = tk.Frame(win, bg=C["card"])
+        bar.pack(fill="x")
+        use_btn = ttk.Button(bar, text="Use the improved request", state="disabled")
+        use_btn.pack(side="left")
+        change_btn = ttk.Button(bar, text="Choose a different local AI")
+        change_btn.pack(side="left", padx=(10, 0))
+        ttk.Button(bar, text="Close", command=win.destroy).pack(side="right")
+        names = [Path(a).name for a in self.attachments]
+        state = {"improved": ""}
+
+        def alive():
+            try:
+                return win.winfo_exists()
+            except tk.TclError:
+                return False
+
+        def say(text, color=None):
+            if alive():
+                status.config(text=text, fg=color or C["muted"])
+
+        def show(text):
+            if alive():
+                box.configure(state="normal")
+                box.delete("1.0", "end")
+                box.insert("1.0", text)
+                box.configure(state="disabled")
+
+        def run_with(kind, model):
+            say(f"Reviewing with {model}. The first answer can take a minute or two while the model loads...")
+            def work():
+                try:
+                    res = localai.review_request(kind, model, request, names)
+                except Exception as err:
+                    self.after(0, lambda: say("The local AI did not answer: " + str(err)[:300], C["bad"]))
+                    return
+                def done():
+                    if not alive():
+                        return
+                    if res["improved"]:
+                        state["improved"] = res["improved"]
+                        text = ("IMPROVED REQUEST\n" + res["improved"] + "\n\nQUESTIONS\n" + (res["questions"] or "None") +
+                                "\n\nPRIVACY CHECK\n" + (res["privacy"] or "Clear"))
+                        use_btn.configure(state="normal")
+                        say("Done. Read it, then press Use the improved request, or close this window to keep your own wording.", C["ok"])
+                    else:
+                        text = res["raw"] or "(The local AI returned nothing.)"
+                        say("The local AI did not follow the format, so the answer is shown as it came. Your request was not changed.", C["warn"])
+                    show(text)
+                self.after(0, done)
+            threading.Thread(target=work, daemon=True).start()
+
+        def use_improved():
+            if state["improved"]:
+                self.request.delete("1.0", "end")
+                self.request.insert("1.0", state["improved"])
+                self.placeholder_on = False
+                self.request.configure(fg=C["ink"])
+                win.destroy()
+
+        use_btn.configure(command=use_improved)
+
+        def choose():
+            say("Looking for local AI models on this computer. This can take a few seconds...")
+            def work():
+                try:
+                    choices = localai.all_choices()
+                except Exception:
+                    choices = []
+                self.after(0, lambda: picked(choices))
+            threading.Thread(target=work, daemon=True).start()
+
+        def picked(choices):
+            if not alive():
+                return
+            if not choices:
+                found = localai.find_local()
+                if found:
+                    say("Found " + " and ".join(p["label"] for p in found) + " but no downloaded chat models. "
+                        "Download a model in that program first, then try again.", C["warn"])
+                else:
+                    say("No local AI found.", C["warn"])
+                return
+            saved = self.saved_local()
+            if len(choices) == 1:
+                remember(choices[0])
+                run_with(choices[0][0], choices[0][2])
+                return
+            if saved and not force_choose_flag["on"]:
+                for c in choices:
+                    if (c[0], c[2]) == saved:
+                        run_with(c[0], c[2])
+                        return
+            ask(choices)
+
+        def remember(c):
+            import ailab
+            cfg = ailab.load_config()
+            cfg["local_ai"] = {"kind": c[0], "model": c[2]}
+            ailab.save_config(cfg)
+
+        def ask(choices):
+            dlg = tk.Toplevel(win)
+            dlg.title("Which local AI?")
+            dlg.configure(bg=C["card"], padx=20, pady=16)
+            dlg.transient(win)
+            tk.Label(dlg, text="Which local AI should review your requests?", font=self.f_h2, bg=C["card"], fg=C["ink"]).pack(anchor="w")
+            tk.Label(dlg, text="AI Lab will remember your choice. You can change it any time from the review window.",
+                     font=self.f_small, bg=C["card"], fg=C["muted"]).pack(anchor="w", pady=(2, 8))
+            lb = tk.Listbox(dlg, width=60, height=min(12, max(4, len(choices))), font=self.f_body, activestyle="none", exportselection=False)
+            lb.pack(fill="both", expand=True)
+            for c in choices:
+                lb.insert("end", f"{c[1]}:  {c[2]}")
+            lb.selection_set(0)
+            def go():
+                sel = lb.curselection()
+                if not sel:
+                    return
+                c = choices[sel[0]]
+                remember(c)
+                dlg.destroy()
+                run_with(c[0], c[2])
+            ttk.Button(dlg, text="Use this one", style="Accent.TButton", command=go).pack(anchor="w", pady=(10, 0))
+            lb.bind("<Double-Button-1>", lambda _e: go())
+
+        force_choose_flag = {"on": force_choose}
+        def change():
+            force_choose_flag["on"] = True
+            use_btn.configure(state="disabled")
+            choose()
+        change_btn.configure(command=change)
+        choose()
 
     # ---- Gemini model
     def gemini_model(self):

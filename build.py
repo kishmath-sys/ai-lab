@@ -1,7 +1,7 @@
 import base64, io, zipfile, sys
 from pathlib import Path
 here = Path(__file__).resolve().parent
-files = ["ailab.py", "launcher.pyw", "convert.py", "a11y.py", "mailer.py", "HOW-TO.txt"]
+files = ["ailab.py", "launcher.pyw", "convert.py", "a11y.py", "mailer.py", "localai.py", "HOW-TO.txt"]
 buf = io.BytesIO()
 with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
     for name in files:
