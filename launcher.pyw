@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -265,8 +266,11 @@ class App(tk.Tk):
         self.file_list = tk.Listbox(row, height=2, font=self.f_body, relief="solid", borderwidth=1, highlightthickness=0,
                                     activestyle="none", selectmode="extended")
         self.file_list.pack(side="left", fill="x", expand=True)
+        self.file_scroll = ttk.Scrollbar(row, orient="vertical", command=self.file_list.yview)
+        self.file_list.configure(yscrollcommand=self.file_scroll.set)
         btns = tk.Frame(row, bg=C["card"])
         btns.pack(side="left", padx=(8, 0))
+        self.file_btns = btns
         ttk.Button(btns, text="Add files...", command=self.add_files).pack(fill="x")
         ttk.Button(btns, text="Remove", command=self.remove_files).pack(fill="x", pady=(6, 0))
         self.after(300, self.setup_drop)
@@ -1269,20 +1273,29 @@ class App(tk.Tk):
             if str(path) not in self.attachments:
                 self.attachments.append(str(path))
                 self.file_list.insert("end", path.name)
+        self.refit_files()
         if problems:
             messagebox.showinfo("Some files were not added", "\n\n".join(problems))
 
     def setup_drop(self):
         """Lets you drag files from File Explorer onto the AI Lab window (Windows only, no add-on needed).
-        If anything goes wrong it quietly does nothing and the Add files button still works."""
+        If anything goes wrong it quietly does nothing and the Add files button still works.
+        A note about what happened is saved in dnd-log.txt next to the program."""
         self.dnd_ok = False
         if os.name != "nt":
             return
+        log = HERE / "dnd-log.txt"
+        def note(text):
+            try:
+                with open(log, "a", encoding="utf-8") as fh:
+                    fh.write(time.strftime("%Y-%m-%d %H:%M:%S ") + text + "\n")
+            except OSError:
+                pass
         try:
             import ctypes
             from ctypes import wintypes
             user32, shell32 = ctypes.windll.user32, ctypes.windll.shell32
-            WM_DROPFILES, GWLP_WNDPROC, GA_ROOT = 0x0233, -4, 2
+            WM_DROPFILES, WM_COPYGLOBALDATA, GWLP_WNDPROC = 0x0233, 0x0049, -4
             LRESULT = ctypes.c_ssize_t
             WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
             if hasattr(user32, "SetWindowLongPtrW"):
@@ -1293,8 +1306,6 @@ class App(tk.Tk):
                 setlong = user32.SetWindowLongW
                 setlong.restype = ctypes.c_long
                 setlong.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
-            user32.GetAncestor.restype = wintypes.HWND
-            user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
             call = user32.CallWindowProcW
             call.restype = LRESULT
             call.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
@@ -1302,14 +1313,7 @@ class App(tk.Tk):
             shell32.DragQueryFileW.restype = wintypes.UINT
             shell32.DragQueryFileW.argtypes = [ctypes.c_void_p, wintypes.UINT, wintypes.LPWSTR, wintypes.UINT]
             shell32.DragFinish.argtypes = [ctypes.c_void_p]
-
-            self.update_idletasks()
-            try:
-                top = int(self.wm_frame(), 16)
-            except Exception:
-                top = 0
-            top = top or user32.GetAncestor(self.winfo_id(), GA_ROOT) or self.winfo_id()
-            prev = {"proc": None}
+            prev = {}
 
             def handler(hwnd, msg, wparam, lparam):
                 if msg == WM_DROPFILES:
@@ -1326,23 +1330,72 @@ class App(tk.Tk):
                     if paths:
                         self.after(0, lambda p=paths: self.add_paths(p))
                     return 0
-                return call(prev["proc"], hwnd, msg, wparam, lparam)
+                return call(prev.get(hwnd), hwnd, msg, wparam, lparam)
 
             self._drop_proc = WNDPROC(handler)  # keep a reference so it is not freed
-            old = setlong(top, GWLP_WNDPROC, ctypes.cast(self._drop_proc, ctypes.c_void_p))
-            if not old:
-                return
-            prev["proc"] = old
-            shell32.DragAcceptFiles(top, True)
-            self.dnd_ok = True
-            self.files_hint.configure(text="  PDF, Word (.docx), text, HTML, CSV.  You can drag files onto this window.")
-        except Exception:
+            proc_ptr = ctypes.cast(self._drop_proc, ctypes.c_void_p)
+
+            def hook(hwnd):
+                if not hwnd or hwnd in prev:
+                    return False
+                try:
+                    user32.ChangeWindowMessageFilterEx(hwnd, WM_DROPFILES, 1, None)
+                    user32.ChangeWindowMessageFilterEx(hwnd, WM_COPYGLOBALDATA, 1, None)
+                except Exception:
+                    pass
+                old = setlong(hwnd, GWLP_WNDPROC, proc_ptr)
+                if not old:
+                    return False
+                prev[hwnd] = old
+                shell32.DragAcceptFiles(hwnd, True)
+                return True
+
+            self.update_idletasks()
+            tops = []
+            def walk(w):
+                for child in w.winfo_children():
+                    if isinstance(child, tk.Toplevel):
+                        continue
+                    try:
+                        hook(child.winfo_id())
+                    except Exception:
+                        pass
+                    walk(child)
+            # the window itself, its outer frame, and every part inside it, so a drop works anywhere on the window
+            try:
+                hook(self.winfo_id())
+                outer = int(self.wm_frame(), 16)
+                if outer != self.winfo_id():
+                    hook(outer)
+            except Exception as err:
+                note("could not hook the window itself: " + repr(err))
+            walk(self)
+            self.dnd_ok = len(prev) > 0
+            note(f"drag and drop hooked on {len(prev)} window parts")
+            if self.dnd_ok:
+                self.files_hint.configure(text="  PDF, Word (.docx), text, HTML, CSV.  You can drag files onto this window.")
+        except Exception as err:
             self.dnd_ok = False
+            note("drag and drop could not start: " + repr(err))
 
     def remove_files(self):
         for index in reversed(self.file_list.curselection()):
             self.file_list.delete(index)
             del self.attachments[index]
+        self.refit_files()
+
+    def refit_files(self):
+        """Makes the files box tall enough for what is in it (up to 6 rows, then it scrolls) and grows the window to fit."""
+        n = len(self.attachments)
+        self.file_list.configure(height=max(2, min(6, n)))
+        if n > 6:
+            self.file_scroll.pack(side="left", fill="y", before=self.file_btns)
+        else:
+            self.file_scroll.pack_forget()
+        self.update_idletasks()
+        need = self.winfo_reqheight()
+        if need > self.winfo_height():
+            self.geometry(f"{self.winfo_width()}x{need}")
 
     # ---- run view
     def build_run_view(self):
